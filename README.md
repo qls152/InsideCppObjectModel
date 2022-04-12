@@ -42,3 +42,18 @@ gcc version 9.3.0 (Ubuntu 9.3.0-17ubuntu1~20.04)
 本git仓库主要讲解gcc编译器针对C++对象模型的实现
 
 其中文章部分图片为了方便显示，我直接先上传知乎，并在该仓库的image也放置原图以备份。
+
+
+# 参考文献
+
+[C++ compiler support](https://en.cppreference.com/w/cpp/compiler_support#cpp20)
+
+[cpp可用资源](https://en.cppreference.com/w/cpp/links)
+
+[C++ – AN INVISIBLE FOUNDATION OF EVERYTHING](https://accu.org/journals/overload/29/161/stroustrup/)
+
+[How C++ Resolves a Function Call](https://preshing.com/20210315/how-cpp-resolves-a-function-call/)
+
+[Understanding C++ Modules: Part 1: Hello Modules, and Module Units](https://vector-of-bool.github.io/2019/03/10/modules-1.html)
+
+[What are Aggregates and PODs and how/why are they special?](https://stackoverflow.com/questions/4178175/what-are-aggregates-and-pods-and-how-why-are-they-special/7189821#7189821)
