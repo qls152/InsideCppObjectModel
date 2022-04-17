@@ -323,13 +323,187 @@ dsize(C) = 0
 
 > primary基类：动态类的第一个非虚直接动态基类
 
-  - 识别所有直接或间接的虚拟基类，它们是某些其他直接或间接基类的primary基类。 这些虚基类叫做间接primary基类。
+> nearly empty class: A class that contains a virtual pointer, but no 
+> other data except (possibly) virtual bases. In particular, it:
 
-  - 如果C有一个动态基类，则尝试选择一个primary基类B。它是第一个（按直接基类顺序）非虚动态基类（如果存在). 否则，它是一个几乎空的虚基类，是（前序）继承图顺序中的第一个，如果存在则不是间接primary基类，或者如果它们都是间接primary基类，则只是第一个。
+> has no non-static data members other than zero-width bitfields,
 
-  - 如果C没有主基类，则在偏移量0处为C分配vptr，并将 sizeof(C)、align(C) 和 dsize(C) 设置为指针的适当值（对于 Itanium 64，所有 8 个字节 位 ABI）。
+> has no direct base classes that are not either empty, nearly empty, 
+> or virtual,
 
+> has at most one non-virtual, nearly empty direct base class, and
 
+> has no proper base class that is empty, not morally virtual, and at 
+> an offset other than zero.
+
+> 简单来说，几乎空类是指只含有vptr的指针
+
+  a. 识别所有直接或间接的虚拟基类，它们是某些其他直接或间接基类的primary基类。 这些虚基类叫做间接primary基类。
+
+  b. 如果C有一个动态基类，则尝试选择一个primary基类B。它是第一个（按直接基类顺序）非虚动态基类（如果存在). 否则，它是一个几乎空的虚基类，是（前序）继承图顺序中的第一个，如果存在则不是间接primary基类，或者如果它们都是间接primary基类，则只是第一个。
+
+  c. 如果C没有主基类，则在偏移量0处为C分配vptr，并将 sizeof(C)、align(C) 和 dsize(C) 设置为指针的适当值（对于 Itanium 64，所有 8 个字节 位 ABI）。
+
+**NOTE:上述b现在被认为是设计中的错误。 使用第一个间接主基类作为派生类的主基类并不会节省对象中的任何空间，并且会导致在基类虚表的附加副本中出现一些虚函数指针的重复。**
+
+**好处是使用派生类的虚指针作为基类的虚指针通常会节省负载，并且调用它的虚函数不需要对this指针进行调整。**
+
+为了更好的理解上述概念引入如下示例代码
+
+```c++
+struct A { virtual void f(){}; };
+struct B : virtual public A { int i{0}; };
+struct C : virtual public A { int j{}; };
+struct D : public B, public C {};
+
+int main() {
+  D d;
+  C c;
+  return 0;
+}
+```
+
+通过[Compiler Explorer](https://godbolt.org/)可知D的vtable如下所示
+
+```c++
+vtable for D:
+        .quad   0
+        .quad   0
+        .quad   0
+        .quad   typeinfo for D
+        .quad   A::f()
+        .quad   -16
+        .quad   -16
+        .quad   -16
+        .quad   typeinfo for D
+        .quad   0
+```
+
+通过gdb可知D的部分内存如下所示
+
+```c++
+(gdb) p d
+$2 = (D) {
+  <B> = {
+    <A> = {
+      _vptr.A = 0x555555557bf8 <vtable for D+32>
+    }, 
+    members of B:
+    i = 0
+  }, 
+  <C> = {
+    members of C:
+    j = 0
+--Type <RET> for more, q to quit, c to continue without paging--
+  }, <No data fields>}
+(gdb) 
+(gdb) 
+(gdb) p sizeof(d)
+$3 = 32
+```
+
+可知gdb显示D的成员只有一个vptr，但是sizeof(d)的大小为32，**那么原因是什么呢？**
+
+此处可确定gdb显示D的成员不全，从D的vtable和sizeof(d)的大小可知，D包含两个vptr，也即D的内存布局及vtable结构如下所示
+
+![](https://pica.zhimg.com/80/v2-4a21157dbe2eeb09c89caf8e8cd9cf0b_1440w.png)
+
+之所以有如此异常，是因为C++ABI中规定
+
+**当类C的任何间接主基类E，即已被选为C的某个其他基类（直接或间接、虚拟或非虚拟）的主基类的一个，将作为该其他基类的一部分进行分配**
+
+同时，上述示例中类A为D的间接primary基类，故其会用作primary 基类，首先分配一个vptr指向A vtable的副本（primary vtable).
+
+## 3.2 分配成员变量/基类 
+
+**注：此阶段不会分配虚基类**
+
+对于每个成员组件D(首先是C的primary基类，然后是声明顺序的非primary、非虚直接基类，然后是声明顺序的非静态数据成员和未命名位域），分配如下 ：
+
+1. 如果 D 是声明类型为 T 且声明宽度为n位的（可能未命名）位域：
+   
+  根据 sizeof(T) 和 n 有两种情况：
+
+  a. 如果 sizeof(T)*8 >= n，则根据底层 C psABI 的要求分配位域，且位域永远不会放置在C的基类的尾部填充中。
+
+  如果 dsize(C) > 0，并且偏移量 dsize(C) - 1 处的字节部分由位域填充，并且该位域也是在 C 中声明的数据成员（但不在 C 的正确基类之一中），则 下一个可用位是偏移量 dsize(C) - 1 处的未填充位。否则，下一个可用位位于偏移量 dsize(C) 处。
+
+  如下示例可辅助理解
+
+  ```c++
+  struct B : virtual public A { public: int i{0}; char a1_{};};
+  class E : public B {
+    int a_{0};
+    unsigned char b : 3;
+
+    int c:3;
+  };
+
+  int main() {
+    // D d;
+    E e;
+    return 0;
+  }
+  ```
+
+  通过gdb可知，sizeof(e) = 24
+
+  b. 如果 sizeof(T)*8 < n，则令 T' 为 sizeof(T')*8 <= n 的最大整数 POD 类型。 位域从与 T' 适当对齐的下一个偏移量开始分配，长度为 n 位。 第一个 sizeof(T)*8 位用于保存位域的值，然后是 n - sizeof(T)*8 位的填充。
+
+  如下示例可辅助理解
+
+  ```c++
+  struct B : virtual public A { public: int i{0}; char a1_{};};
+
+  class E : public B {
+    int a_{0};
+    unsigned char b : 35;
+  };
+
+  int main() {
+    // D d;
+    E e;
+    return 0;
+  }
+  ```
+
+  通过gdb可知，sizeof(e) = 32.
+
+**在任何一种情况下，更新 dsize(C) 以包括包含位域（部分）的最后一个字节，并将 sizeof(C) 更新为 max(sizeof(C),dsize(C))。**
+
+2. 当D是一个非空基类或者数据成员时
+
+- 从偏移量dsize(C)开始，如果需要对齐, 则根据基类的nvalign(D)或数据成员的 align(D)增加相应偏移值, 获得新的偏移量B。 
+
+- 将D放置在此偏移B处，若这样导致相同类型的两个组件（直接或间接）具有相同的偏移，则针对基类，将B增加nvalign(D)，针对数据成员，将B增加align(D)
+
+- 重试，重复直到成功（不小于sizeof(C)向上取整到所需的对齐值）。
+
+此处以前述部分的Concrete3类来举例说明，Concrete3内存分配过程如下
+
+```c++
+                             分配Concerete1
+分配Concrete2---------------> 分配数据成员
+                            
+
+分配数据成员(c3_)
+```
+
+- 如果D是基类，则此步骤仅分配其非虚部分，即排除任何直接或间接虚基类。
+
+- 如果D是基类，则
+  sizeof(C) = max (sizeof(C), offset(D)+nvsize(D)) 
+
+- 如果D是数据成员，则将
+  izeof(C) = max (sizeof(C), offset(D)+sizeof(D))
+
+- 如果D是一个基类（在这种情况下非空的），则
+  dsize(C) = offset(D)+nvsize(D)，
+  align(C) = max (align(C), nvalign(D))
+  
+- 如果D是数据成员，则
+  dsize(C) = offset(D)+sizeof(D)
+  align(C) = max (align(C), align(D))
 
 # 参考
 
@@ -337,5 +511,11 @@ dsize(C) = 0
 
 [alignof](https://en.cppreference.com/w/cpp/language/alignof)
 
+[bit filed](https://en.cppreference.com/w/cpp/language/bit_field)
+
+[C++ bit fields](https://docs.microsoft.com/en-us/cpp/cpp/cpp-bit-fields?view=msvc-170)
+
 [Itanium C++ ABI (Revision: 1.83)](http://refspecs.linux-foundation.org/cxxabi-1.83.html#vtable)
+
+
 
