@@ -482,7 +482,7 @@ $3 = 32
 此处以前述部分的Concrete3类来举例说明，Concrete3内存分配过程如下
 
 ```c++
-                             分配Concerete1
+                             分配Concrete1
 分配Concrete2---------------> 分配数据成员
                             
 
@@ -495,7 +495,7 @@ $3 = 32
   sizeof(C) = max (sizeof(C), offset(D)+nvsize(D)) 
 
 - 如果D是数据成员，则将
-  izeof(C) = max (sizeof(C), offset(D)+sizeof(D))
+  sizeof(C) = max (sizeof(C), offset(D)+sizeof(D))
 
 - 如果D是一个基类（在这种情况下非空的），则
   dsize(C) = offset(D)+nvsize(D)，
@@ -505,7 +505,104 @@ $3 = 32
   dsize(C) = offset(D)+sizeof(D)
   align(C) = max (align(C), align(D))
 
+故上述Concrete3的分配过程可表示如下过程
+
+![](https://pica.zhimg.com/80/v2-566045ea2b9ef3cb3eced11745f1a268_1440w.png)
+
+![](https://pica.zhimg.com/80/v2-16a81ec2d8326d36206a58f12c01b436_1440w.png)
+
+![](https://pica.zhimg.com/80/v2-3151ebf930734d2404fefc6ec9d53189_1440w.png)
+
+3. 如果D是空的proper基类
+
+它的分配类似于上述2，除了在dsize(C)开始之前考虑了额外的候选偏移量。 
+
+- 首先，尝试将D放置在偏移量零处。
+
+- 如果失败(由于组件类型冲突），则同非空proper基类一样，开始在dsize(C)偏移尝试分配。 
+
+- 如果在dsize(C)存在类型冲突（根据需要更新对齐方式），则将候选偏移量增加nvalign(D)，然后重试，重复直到成功。
+
+**一旦选择了offset(D)，将 sizeof(C) 更新为 max (sizeof(C), offset(D)+sizeof(D))。 请注意，nvalign(D) 为 1，因此不需要更新 align(C)。 同样，由于 D 是一个空基类，因此不需要更新 dsize(C)。**
+
+## 3.3 虚基类分配
+
+最后分配任何直接或间接虚基类（**主基类或任何间接主基类除外**），其分配过程同上述3.2中的2(若为非空)或者3(若为空)一样。 将 sizeof(C) 更新为 max (sizeof(C), offset(D)+nvsize(D))。 如果非空，还更新 align(C) 和 dsize(C)。
+
+**主基类已在上述3.2的1中分配。 当前类C的任何间接主基类E，即已被选为C的某个其他基类B（直接或间接、虚拟或非虚拟)的主要基类，将E作为该B的一部分分配，这里不会进行分配。 如果E是多个其他基类的主基类，则在C中用作其分配的实例应是继承图顺序中的第一个。**
+
+譬如如下示例
+
+```c++
+struct R { virtual void r () {} };
+struct S { virtual void s () {} };
+struct T : virtual public S { virtual void t (){} };
+struct U : public R, virtual public T { virtual void u () {} };
+
+int main() {
+  U u;
+  return 0;
+}
+
+```
+
+则上述U的主基类为R，且S为T的主基类；U的继承图顺序为{U, R, T, S}; 因此U的分配布局如下
+
+```c++
+struct X {
+  R r;
+  T t;
+};
+```
+
+通过gdb也可观察U的对象模型布局如下
+
+```c++
+$2 = (U) {
+  <R> = {
+    _vptr.R = 0x555555557c68 <vtable for U+32>
+  }, 
+  <T> = {
+    <S> = {
+      _vptr.S = 0x555555557ca0 <vtable for U+88>
+    }, <No data fields>}, <No data fields>}
+```
+
+同时考虑如下示例代码
+
+```c++
+  struct R { virtual void r () {} };
+  struct S { virtual void s () {} };
+  struct T : virtual public S { virtual void t (){} };
+  struct  V : public R, virtual public S, virtual public T { virtual void u () {} };
+
+int main() {
+  V u
+  return 0;
+}
+```
+
+此时U的继承图顺序为{U, R, S, T},尽管如此，虽然S被认为首先作为虚基类进行分配，但它没有单独分配，因为它是T的主基类。 因此sizeof(V) = sizeof(U), 完整布局等价于上述U的相应内存。
+
+## 3.4 完成
+
+将sizeof(C)舍入到align(C)的非零倍数。 如果 C 是 POD，但不是出于布局目的的 POD，则设置 nvsize(C) = sizeof(C)。
+
+综上，针对目前gcc编译器，不带多态的继承并不像[深度探索C++对象模型](https://book.douban.com/subject/1091086/)中所说：
+
+**派生类中base class subobject具有完整性，而是某些场景下会在tail padding处填充！**
+
+# 4 总结
+
+本文讨论了最简单的只要继承不要多态的场景，同时得出如下结论
+
+**GCC编译器不保证派生类中base class subobject具有完整性**
+
 # 参考
+
+[data members存取](https://github.com/qls152/DeepUnderstandingGcc-Clang-CplusplusObjectModel/blob/main/%E6%95%B0%E6%8D%AE%E8%AF%AD%E4%B9%89%E5%AD%A6/data%20members%E5%AD%98%E5%8F%96.md)
+
+[虚拟继承2](https://github.com/qls152/DeepUnderstandingGcc-Clang-CplusplusObjectModel/blob/main/%E6%95%B0%E6%8D%AE%E8%AF%AD%E4%B9%89%E5%AD%A6/%E8%99%9A%E6%8B%9F%E7%BB%A7%E6%89%BF(2).md)
 
 [offsetof](https://en.cppreference.com/w/cpp/types/offsetof)
 
