@@ -57,3 +57,13 @@ gcc version 9.3.0 (Ubuntu 9.3.0-17ubuntu1~20.04)
 [Understanding C++ Modules: Part 1: Hello Modules, and Module Units](https://vector-of-bool.github.io/2019/03/10/modules-1.html)
 
 [What are Aggregates and PODs and how/why are they special?](https://stackoverflow.com/questions/4178175/what-are-aggregates-and-pods-and-how-why-are-they-special/7189821#7189821)
+
+# 一些C++知识点收集
+
+## C++ friend 
+
+[The Power of Hidden Friends in C++](https://www.justsoftwaresolutions.co.uk/cplusplus/hidden-friends.html)
+
+[Passkey Idiom: More Useful Empty Classes](https://arne-mertz.de/2016/10/passkey-idiom/)
+
+[How C++ Resolves a Function Call](https://preshing.com/20210315/how-cpp-resolves-a-function-call/)
