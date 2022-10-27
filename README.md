@@ -52,7 +52,7 @@ gcc version 9.3.0 (Ubuntu 9.3.0-17ubuntu1~20.04)
 
 [C++ – AN INVISIBLE FOUNDATION OF EVERYTHING](https://accu.org/journals/overload/29/161/stroustrup/)
 
-[How C++ Resolves a Function Call](https://preshing.com/20210315/how-cpp-resolves-a-function-call/)
+[C++ FAQ](https://isocpp.org/faq)
 
 [Understanding C++ Modules: Part 1: Hello Modules, and Module Units](https://vector-of-bool.github.io/2019/03/10/modules-1.html)
 
